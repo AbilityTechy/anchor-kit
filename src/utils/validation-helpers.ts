@@ -119,6 +119,35 @@ function validateFrameworkRateLimit(framework: AnchorKitConfig['framework']): bo
   return true;
 }
 
+function validateKycConfig(kyc: AnchorKitConfig['kyc']): boolean {
+  if (kyc === undefined) return true;
+  if (!kyc || typeof kyc !== 'object' || Array.isArray(kyc)) {
+    throw new Error('kyc must be an object');
+  }
+
+  if (kyc.level !== undefined && !['none', 'basic', 'strict'].includes(kyc.level)) {
+    throw new Error('kyc.level must be one of: none, basic, strict');
+  }
+
+  const booleanKeys = [
+    'requireDocuments',
+    'requireName',
+    'requireAddress',
+    'requireEmail',
+    'requirePhoneNumber',
+    'requireBirthDate',
+  ] as const;
+
+  for (const key of booleanKeys) {
+    const value = kyc[key];
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw new Error(`kyc.${key} must be a boolean`);
+    }
+  }
+
+  return true;
+}
+
 function validateFrameworkUrls(
   metadata: AnchorKitConfig['metadata'],
   server: AnchorKitConfig['server'],
@@ -304,6 +333,7 @@ function validateAnchorKitConfig(config: AnchorKitConfig): boolean {
 
   NetworkConfigSchema.validate(network);
   SecurityConfigSchema.validate(security);
+  validateKycConfig(config.kyc);
 
   if (!assets.assets || !Array.isArray(assets.assets) || assets.assets.length === 0) {
     throw new Error('At least one asset must be configured in assets.assets');
