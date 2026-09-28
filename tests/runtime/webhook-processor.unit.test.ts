@@ -109,23 +109,20 @@ describe('DefaultWebhookProcessor Unit Tests', () => {
       createdAt: new Date().toISOString(),
     };
 
+    const insertOrGetWebhookEvent = vi
+      .fn<DatabaseAdapter['insertOrGetWebhookEvent']>()
+      .mockResolvedValueOnce({
+        inserted: true,
+        record: {
+          ...failingRecord,
+          status: 'pending',
+          errorMessage: null,
+          processedAt: null,
+          payload: { type: 'retry' },
+        },
+      });
     const mockDatabase = {
-      insertOrGetWebhookEvent: vi
-        .fn()
-        .mockResolvedValueOnce({
-          inserted: false,
-          record: failingRecord,
-        })
-        .mockResolvedValueOnce({
-          inserted: true,
-          record: {
-            ...failingRecord,
-            status: 'pending',
-            errorMessage: null,
-            processedAt: null,
-            payload: { type: 'retry' },
-          },
-        }),
+      insertOrGetWebhookEvent,
       updateWebhookEventStatus: vi.fn().mockResolvedValue(undefined),
     } as unknown as DatabaseAdapter;
 
@@ -152,5 +149,24 @@ describe('DefaultWebhookProcessor Unit Tests', () => {
       id: 'internal-id-3',
       status: 'processed',
     });
+
+    insertOrGetWebhookEvent.mockResolvedValueOnce({
+      inserted: false,
+      record: {
+        ...failingRecord,
+        status: 'processed',
+        errorMessage: null,
+      },
+    });
+
+    const duplicateResult = await processor.process({
+      eventId: 'external-id-3',
+      provider: 'generic',
+      payload: { type: 'retry' },
+      rawBody: '{}',
+    });
+
+    expect(duplicateResult.duplicate).toBe(true);
+    expect(onEvent).toHaveBeenCalledTimes(1);
   });
 });

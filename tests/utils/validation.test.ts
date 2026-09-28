@@ -1,5 +1,6 @@
 import { AnchorConfig } from '@/core/config';
 import type { AnchorKitConfig } from '@/types/config';
+import { ValidationUtils } from '@/utils/validation';
 import { describe, expect, it } from 'vitest';
 
 describe('Asset Validation (#254)', () => {
@@ -193,5 +194,185 @@ describe('Asset Validation (#254)', () => {
     const anchor = new AnchorConfig(config);
     expect(() => anchor.validate()).toThrow();
     expect(() => anchor.validate()).toThrow(/Invalid asset at index 0/);
+  });
+});
+
+describe('Operational Website Validation (#388)', () => {
+  const baseConfig: AnchorKitConfig = {
+    network: { network: 'testnet' },
+    server: { port: 3000 },
+    security: {
+      sep10SigningKey: 'secret-key-10',
+      interactiveJwtSecret: 'jwt-secret',
+      distributionAccountSecret: 'dist-secret',
+    },
+    assets: {
+      assets: [
+        {
+          code: 'USDC',
+          issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        },
+      ],
+    },
+    framework: {
+      database: {
+        provider: 'postgres',
+        url: 'postgresql://localhost:5432/anchor',
+      },
+    },
+  };
+
+  it('should accept valid HTTP website URL', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'http://example.com',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).not.toThrow();
+  });
+
+  it('should accept valid HTTPS website URL', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'https://example.com',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).not.toThrow();
+  });
+
+  it('should accept config without operational.website (optional field)', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        name: 'Test Anchor',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).not.toThrow();
+  });
+
+  it('should accept config without operational section', () => {
+    const anchor = new AnchorConfig(baseConfig);
+    expect(() => anchor.validate()).not.toThrow();
+  });
+
+  it('should reject malformed URL', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'not-a-valid-url',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should reject FTP scheme', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'ftp://example.com',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should reject javascript: scheme', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'javascript:alert(1)',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should reject data: scheme', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'data:text/html,<script>alert(1)</script>',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should reject file: scheme', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'file:///etc/passwd',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should reject mailto: scheme', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        website: 'mailto:test@example.com',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid URL format for operational.website/);
+  });
+
+  it('should accept valid support email', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        supportEmail: 'support@example.com',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).not.toThrow();
+  });
+
+  it('should reject malformed support email', () => {
+    const config: AnchorKitConfig = {
+      ...baseConfig,
+      operational: {
+        supportEmail: 'not-an-email',
+      },
+    };
+    const anchor = new AnchorConfig(config);
+    expect(() => anchor.validate()).toThrow();
+    expect(() => anchor.validate()).toThrow(/Invalid email format for operational.supportEmail/);
+  });
+});
+
+describe('Stellar Address Checksum Validation (#386)', () => {
+  const VALID_PUBLIC_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+  // One-character mutation of the StrKey checksum (final char 5 -> 3)
+  const BAD_CHECKSUM_KEY = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA3';
+
+  it('should return true for a valid public key', () => {
+    expect(ValidationUtils.isValidStellarAddress(VALID_PUBLIC_KEY)).toBe(true);
+  });
+
+  it('should return false for a regex-shaped key with a bad checksum', () => {
+    expect(BAD_CHECKSUM_KEY).toMatch(/^G[A-Z2-7]{55}$/);
+    expect(ValidationUtils.isValidStellarAddress(BAD_CHECKSUM_KEY)).toBe(false);
+  });
+
+  it('should return false for empty or non-string input', () => {
+    expect(ValidationUtils.isValidStellarAddress('')).toBe(false);
+    expect(ValidationUtils.isValidStellarAddress(null as unknown as string)).toBe(false);
+    expect(ValidationUtils.isValidStellarAddress(undefined as unknown as string)).toBe(false);
   });
 });
