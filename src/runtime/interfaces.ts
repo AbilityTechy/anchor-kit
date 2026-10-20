@@ -71,6 +71,19 @@ export interface DatabaseAdapter {
     amount: string;
     status: string;
   }): Promise<InteractiveTransactionRecord>;
+  createDepositWithIdempotency(input: {
+    transactionId: string;
+    account: string;
+    assetCode: string;
+    amount: string;
+    status: string;
+    scope: string;
+    idempotencyId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    statusCode: number;
+    responseBody: string;
+  }): Promise<IdempotencyRecord>;
   getInteractiveTransactionById(id: string): Promise<InteractiveTransactionRecord | null>;
   listPendingTransactionsBefore(cutoffIso: string): Promise<InteractiveTransactionRecord[]>;
   updateTransactionStatus(id: string, status: string): Promise<void>;

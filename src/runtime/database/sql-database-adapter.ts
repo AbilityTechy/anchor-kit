@@ -21,6 +21,8 @@ interface PostgresClient {
   query<T extends Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: T[] }>;
 }
 
+type PostgresClientConstructor = new (config: { connectionString: string }) => PostgresClient;
+
 const SQLITE_FILE_PREFIX = 'file:';
 
 function nowIso(): string {
@@ -47,6 +49,7 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
   private readonly url: string;
   private sqlite: SqliteLike | null = null;
   private postgres: PostgresClient | null = null;
+  private postgresClientConstructor: PostgresClientConstructor | null = null;
 
   constructor(databaseConfig: FrameworkConfig['database']) {
     this.provider = databaseConfig.provider;
@@ -63,8 +66,9 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
       const moduleName = 'pg';
       const pgModuleUnknown: unknown = await import(moduleName);
       const pgModule = pgModuleUnknown as {
-        Client: new (config: { connectionString: string }) => PostgresClient;
+        Client: PostgresClientConstructor;
       };
+      this.postgresClientConstructor = pgModule.Client;
       this.postgres = new pgModule.Client({ connectionString: this.url });
       await this.postgres.connect();
       return;
@@ -83,6 +87,7 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
       await this.postgres.end();
       this.postgres = null;
     }
+    this.postgresClientConstructor = null;
   }
 
   public async migrate(): Promise<void> {
@@ -332,6 +337,177 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
     };
   }
 
+  public async createDepositWithIdempotency(input: {
+    transactionId: string;
+    account: string;
+    assetCode: string;
+    amount: string;
+    status: string;
+    scope: string;
+    idempotencyId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    statusCode: number;
+    responseBody: string;
+  }): Promise<IdempotencyRecord> {
+    const createdAt = nowIso();
+
+    if (this.sqlite) {
+      this.sqlite.exec('BEGIN IMMEDIATE');
+      try {
+        this.sqlite
+          .prepare(
+            'INSERT INTO idempotency_keys (id, scope, idempotency_key, request_hash, status_code, response_body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope, idempotency_key) DO NOTHING',
+          )
+          .run(
+            input.idempotencyId,
+            input.scope,
+            input.idempotencyKey,
+            input.requestHash,
+            input.statusCode,
+            input.responseBody,
+            createdAt,
+          );
+
+        const row = this.sqlite
+          .prepare('SELECT * FROM idempotency_keys WHERE scope = ? AND idempotency_key = ? LIMIT 1')
+          .get(input.scope, input.idempotencyKey) as Record<string, unknown> | null;
+        if (!row) {
+          throw new ConfigError('Failed to insert or retrieve deposit idempotency record');
+        }
+
+        if (String(row.id) === input.idempotencyId) {
+          this.sqlite
+            .prepare(
+              'INSERT INTO interactive_transactions (id, account, kind, asset_code, amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            )
+            .run(
+              input.transactionId,
+              input.account,
+              'deposit',
+              input.assetCode,
+              input.amount,
+              input.status,
+              createdAt,
+              createdAt,
+            );
+          this.sqlite
+            .prepare(
+              'UPDATE idempotency_keys SET response_body = ? WHERE scope = ? AND idempotency_key = ?',
+            )
+            .run(input.responseBody, input.scope, input.idempotencyKey);
+          row.response_body = input.responseBody;
+        }
+
+        this.sqlite.exec('COMMIT');
+        return this.mapIdempotencyRow(row);
+      } catch (error) {
+        try {
+          this.sqlite.exec('ROLLBACK');
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], 'Deposit rollback failed', {
+            cause: rollbackError,
+          });
+        }
+        throw error;
+      }
+    }
+
+    const Client = this.postgresClientConstructor;
+    if (!Client) {
+      throw new ConfigError('PostgreSQL client is not connected');
+    }
+
+    const client = new Client({ connectionString: this.url });
+    let transactionStarted = false;
+    let operationError: unknown;
+    let result: IdempotencyRecord | undefined;
+    try {
+      await client.connect();
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      const inserted = await client.query<Record<string, unknown>>(
+        'INSERT INTO idempotency_keys (id, scope, idempotency_key, request_hash, status_code, response_body, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT(scope, idempotency_key) DO NOTHING RETURNING *',
+        [
+          input.idempotencyId,
+          input.scope,
+          input.idempotencyKey,
+          input.requestHash,
+          input.statusCode,
+          input.responseBody,
+          createdAt,
+        ],
+      );
+
+      let row = inserted.rows[0];
+      if (row) {
+        await client.query(
+          'INSERT INTO interactive_transactions (id, account, kind, asset_code, amount, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [
+            input.transactionId,
+            input.account,
+            'deposit',
+            input.assetCode,
+            input.amount,
+            input.status,
+            createdAt,
+            createdAt,
+          ],
+        );
+        await client.query(
+          'UPDATE idempotency_keys SET response_body = $1 WHERE scope = $2 AND idempotency_key = $3',
+          [input.responseBody, input.scope, input.idempotencyKey],
+        );
+        row.response_body = input.responseBody;
+      } else {
+        const existing = await client.query<Record<string, unknown>>(
+          'SELECT * FROM idempotency_keys WHERE scope = $1 AND idempotency_key = $2 LIMIT 1',
+          [input.scope, input.idempotencyKey],
+        );
+        row = existing.rows[0];
+      }
+
+      if (!row) {
+        throw new ConfigError('Failed to insert or retrieve deposit idempotency record');
+      }
+
+      await client.query('COMMIT');
+      transactionStarted = false;
+      result = this.mapIdempotencyRow(row);
+    } catch (error) {
+      operationError = error;
+      if (transactionStarted) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          operationError = new AggregateError([error, rollbackError], 'Deposit rollback failed', {
+            cause: error,
+          });
+        }
+      }
+    }
+
+    try {
+      await client.end();
+    } catch (endError) {
+      if (operationError) {
+        throw new AggregateError([operationError, endError], 'Deposit connection cleanup failed', {
+          cause: endError,
+        });
+      }
+      throw endError;
+    }
+
+    if (operationError) {
+      throw operationError;
+    }
+    if (!result) {
+      throw new ConfigError('Failed to create deposit idempotency record');
+    }
+    return result;
+  }
+
   public async getInteractiveTransactionById(
     id: string,
   ): Promise<InteractiveTransactionRecord | null> {
@@ -553,57 +729,33 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
       return { record: this.mapWebhookRow(row), inserted: true };
     }
 
-    const existingPg = await this.requirePostgres().query<Record<string, unknown>>(
+    const postgres = this.requirePostgres();
+    const inserted = await postgres.query<Record<string, unknown>>(
+      'INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, NULL, NULL, $6) ON CONFLICT(event_id) DO NOTHING RETURNING *',
+      [input.id, eventId, provider, JSON.stringify(input.payload), 'pending', createdAt],
+    );
+    if (inserted.rows[0]) {
+      return { record: this.mapWebhookRow(inserted.rows[0]), inserted: true };
+    }
+
+    const retry = await postgres.query<Record<string, unknown>>(
+      "UPDATE webhook_events SET provider = $1, payload = $2::jsonb, status = 'pending', error_message = NULL, processed_at = NULL WHERE event_id = $3 AND status = 'failed' RETURNING *",
+      [provider, JSON.stringify(input.payload), eventId],
+    );
+    if (retry.rows[0]) {
+      return { record: this.mapWebhookRow(retry.rows[0]), inserted: true };
+    }
+
+    const existing = await postgres.query<Record<string, unknown>>(
       'SELECT * FROM webhook_events WHERE event_id = $1 LIMIT 1',
       [eventId],
     );
-
-    const existingRow = existingPg.rows[0];
-    if (existingRow) {
-      const record = this.mapWebhookRow(existingRow);
-
-      if (record.status === 'processed') {
-        return { record, inserted: false };
-      }
-
-      if (record.status === 'failed') {
-        await this.requirePostgres().query(
-          'UPDATE webhook_events SET provider = $1, payload = $2::jsonb, status = $3, error_message = NULL, processed_at = NULL WHERE id = $4',
-          [provider, JSON.stringify(input.payload), 'pending', record.id],
-        );
-
-        const refreshedPg = await this.requirePostgres().query<Record<string, unknown>>(
-          'SELECT * FROM webhook_events WHERE id = $1 LIMIT 1',
-          [record.id],
-        );
-
-        const refreshedRow = refreshedPg.rows[0];
-        if (!refreshedRow) {
-          throw new ConfigError('Failed to retry failed webhook event');
-        }
-
-        return { record: this.mapWebhookRow(refreshedRow), inserted: true };
-      }
-
-      return { record, inserted: false };
-    }
-
-    await this.requirePostgres().query(
-      'INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, NULL, NULL, $6)',
-      [input.id, eventId, provider, JSON.stringify(input.payload), 'pending', createdAt],
-    );
-
-    const response = await this.requirePostgres().query<Record<string, unknown>>(
-      'SELECT * FROM webhook_events WHERE id = $1 LIMIT 1',
-      [input.id],
-    );
-
-    const row = response.rows[0];
+    const row = existing.rows[0];
     if (!row) {
       throw new ConfigError('Failed to insert or retrieve webhook event');
     }
 
-    return { record: this.mapWebhookRow(row), inserted: true };
+    return { record: this.mapWebhookRow(row), inserted: false };
   }
 
   public async updateWebhookEventStatus(input: {

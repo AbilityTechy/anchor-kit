@@ -129,6 +129,10 @@ import { makeSqliteDbUrlForTests } from 'anchor-kit';
 const databaseUrl = makeSqliteDbUrlForTests();
 ```
 
+Run the focused PostgreSQL concurrency check with `npm exec -- vitest run tests/runtime/atomic-idempotency-concurrency.test.ts`. Without `TEST_POSTGRES_URL` or `DATABASE_URL`, the test report marks five PostgreSQL cases skipped while running the SQLite cases. With a working PostgreSQL URL, all eight cases execute and pass. When `CI` or `REQUIRE_POSTGRES_TESTS` is set, a missing PostgreSQL URL or failed connection fails the suite instead of silently passing.
+
+Run the plugin cleanup check with `npm exec -- vitest run tests/core/plugin-lifecycle.test.ts`. It should report three passing tests for reverse-order shutdown, initialization rollback, and cleanup failures that remain observable while the database disconnects.
+
 ## Endpoints
 
 Mounted under your chosen base path (for example `/anchor`):

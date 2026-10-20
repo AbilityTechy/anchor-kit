@@ -547,45 +547,34 @@ async function handleDepositInteractive(
 
   if (typeof idempotencyKey === 'string' && idempotencyKey.length > 0) {
     const idempotencyId = randomUUID();
-    const idempotencyRecord = await context.database.insertOrGetIdempotencyRecord({
-      id: idempotencyId,
+    const transactionId = randomUUID();
+    const createdAt = new Date().toISOString();
+    const responseBody = {
+      id: transactionId,
+      kind: 'deposit',
+      status: 'pending_user_transfer_start',
+      amount,
+      asset_code: assetCode,
+      asset_issuer: selectedAsset.issuer,
+      account: auth.account,
+      interactive_url: `${serverConfig.interactiveDomain}/deposit/${transactionId}`,
+      created_at: createdAt,
+    };
+    const idempotencyRecord = await context.database.createDepositWithIdempotency({
+      transactionId,
+      account: auth.account,
+      assetCode,
+      amount,
+      status: 'pending_user_transfer_start',
       scope,
+      idempotencyId,
       idempotencyKey,
       requestHash,
       statusCode: 201,
-      responseBody: '{}',
+      responseBody: JSON.stringify(responseBody),
     });
 
     if (idempotencyRecord.id === idempotencyId) {
-      const transactionId = randomUUID();
-      const created = await context.database.insertInteractiveTransaction({
-        id: transactionId,
-        account: auth.account,
-        kind: 'deposit',
-        assetCode,
-        amount,
-        status: 'pending_user_transfer_start',
-      });
-
-      const responseBody = {
-        id: created.id,
-        kind: created.kind,
-        status: created.status,
-        amount: created.amount,
-        asset_code: created.assetCode,
-        asset_issuer: selectedAsset.issuer,
-        account: created.account,
-        interactive_url: `${serverConfig.interactiveDomain}/deposit/${created.id}`,
-        created_at: created.createdAt,
-      };
-
-      await context.database.updateIdempotencyRecord({
-        scope,
-        idempotencyKey,
-        statusCode: 201,
-        responseBody: JSON.stringify(responseBody),
-      });
-
       sendJson(res, 201, responseBody);
       return;
     }
@@ -695,8 +684,7 @@ async function handleWebhook(
 
   const { rawBody, body: payload } = parsedBody;
   const eventIdField = payload.id;
-  const normalizedEventId =
-    typeof eventIdField === 'string' ? eventIdField.trim() : '';
+  const normalizedEventId = typeof eventIdField === 'string' ? eventIdField.trim() : '';
   const eventId = normalizedEventId.length > 0 ? normalizedEventId : randomUUID();
   const providerHeader = req.headers['x-webhook-provider'];
   const providerBody = payload.provider;
@@ -717,7 +705,8 @@ async function handleWebhook(
     : typeof signatureHeader === 'string'
       ? signatureHeader
       : undefined;
-  const signature = signatureValue && signatureValue.trim().length > 0 ? signatureValue.trim() : undefined;
+  const signature =
+    signatureValue && signatureValue.trim().length > 0 ? signatureValue.trim() : undefined;
 
   try {
     const result = await context.webhookProcessor.process({

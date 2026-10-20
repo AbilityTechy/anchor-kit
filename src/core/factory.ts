@@ -34,6 +34,7 @@ export class AnchorInstance {
 
   private initialized = false;
   private backgroundJobsRunning = false;
+  private initializedPlugins: AnchorPlugin[] = [];
 
   constructor(config: Partial<AnchorKitConfig>) {
     this.config = new AnchorConfig(config);
@@ -57,51 +58,78 @@ export class AnchorInstance {
   public async init(): Promise<void> {
     if (this.initialized) return;
 
-    const frameworkConfig = this.config.get('framework');
+    try {
+      const frameworkConfig = this.config.get('framework');
 
-    this.database = createSqlDatabaseAdapter(frameworkConfig.database);
-    await this.database.connect();
-    await this.database.migrate();
+      this.database = createSqlDatabaseAdapter(frameworkConfig.database);
+      await this.database.connect();
+      await this.database.migrate();
 
-    const queueBackend = frameworkConfig.queue?.backend ?? 'memory';
-    if (queueBackend !== 'memory') {
-      throw new ConfigError(
-        `Unsupported queue backend: "${queueBackend}". Only "memory" queue backend is currently supported. Please remove or set queue.backend to "memory" in your configuration.`,
-      );
-    }
-
-    const queueConcurrency = frameworkConfig.queue?.concurrency ?? 1;
-    this.queue = new InMemoryQueueAdapter({ concurrency: queueConcurrency });
-
-    this.webhookProcessor = new DefaultWebhookProcessor({
-      config: this.config.getConfig(),
-      database: this.database,
-    });
-
-    const watchersEnabled = frameworkConfig.watchers?.enabled ?? true;
-    if (watchersEnabled) {
-      this.watchers = [
-        new TransactionWatcher(this.database, this.queue, {
-          pollIntervalMs: frameworkConfig.watchers?.pollIntervalMs ?? 15000,
-          transactionTimeoutMs: frameworkConfig.watchers?.transactionTimeoutMs ?? 300000,
-          retentionDays: frameworkConfig.watchers?.retentionDays ?? 90,
-        }),
-      ];
-    }
-
-    this.expressRouter = new AnchorExpressRouter({
-      config: this.config,
-      database: this.database,
-      webhookProcessor: this.webhookProcessor,
-    }).getMiddleware();
-
-    for (const plugin of this.plugins.values()) {
-      if (plugin.init) {
-        await plugin.init(this);
+      const queueBackend = frameworkConfig.queue?.backend ?? 'memory';
+      if (queueBackend !== 'memory') {
+        throw new ConfigError(
+          `Unsupported queue backend: "${queueBackend}". Only "memory" queue backend is currently supported. Please remove or set queue.backend to "memory" in your configuration.`,
+        );
       }
-    }
 
-    this.initialized = true;
+      const queueConcurrency = frameworkConfig.queue?.concurrency ?? 1;
+      this.queue = new InMemoryQueueAdapter({ concurrency: queueConcurrency });
+
+      this.webhookProcessor = new DefaultWebhookProcessor({
+        config: this.config.getConfig(),
+        database: this.database,
+      });
+
+      const watchersEnabled = frameworkConfig.watchers?.enabled ?? true;
+      if (watchersEnabled) {
+        this.watchers = [
+          new TransactionWatcher(this.database, this.queue, {
+            pollIntervalMs: frameworkConfig.watchers?.pollIntervalMs ?? 15000,
+            transactionTimeoutMs: frameworkConfig.watchers?.transactionTimeoutMs ?? 300000,
+            retentionDays: frameworkConfig.watchers?.retentionDays ?? 90,
+          }),
+        ];
+      }
+
+      this.expressRouter = new AnchorExpressRouter({
+        config: this.config,
+        database: this.database,
+        webhookProcessor: this.webhookProcessor,
+      }).getMiddleware();
+
+      for (const plugin of this.plugins.values()) {
+        if (plugin.init) {
+          this.initializedPlugins.push(plugin);
+          await plugin.init(this);
+        }
+      }
+
+      this.initialized = true;
+    } catch (error) {
+      const cleanupErrors = await this.cleanupInitializedPlugins();
+      const database = this.database;
+      this.database = null;
+      if (database) {
+        try {
+          await database.disconnect();
+        } catch (disconnectError) {
+          cleanupErrors.push(disconnectError);
+        }
+      }
+      this.queue = null;
+      this.webhookProcessor = null;
+      this.watchers = [];
+      this.expressRouter = null;
+      this.backgroundJobsRunning = false;
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          'Anchor initialization rollback failed',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
   }
 
   /**
@@ -126,22 +154,56 @@ export class AnchorInstance {
   public async stopBackgroundJobs(): Promise<void> {
     if (!this.initialized || !this.backgroundJobsRunning) return;
 
+    const errors: unknown[] = [];
     for (const watcher of this.watchers) {
-      await watcher.stop();
+      try {
+        await watcher.stop();
+      } catch (error) {
+        errors.push(error);
+      }
     }
 
-    await this.requireQueue().stop();
+    try {
+      await this.requireQueue().stop();
+    } catch (error) {
+      errors.push(error);
+    }
     this.backgroundJobsRunning = false;
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to stop background jobs');
+    }
   }
 
   /**
    * Cleanly shutdown all services.
    */
   public async shutdown(): Promise<void> {
-    if (!this.initialized) return;
-    await this.stopBackgroundJobs();
-    await this.requireDatabase().disconnect();
+    if (!this.initialized && !this.database && this.initializedPlugins.length === 0) return;
+
+    const errors: unknown[] = [];
+    try {
+      await this.stopBackgroundJobs();
+    } catch (error) {
+      errors.push(error);
+    }
+    errors.push(...(await this.cleanupInitializedPlugins()));
+    const database = this.database;
+    this.database = null;
+    if (database) {
+      try {
+        await database.disconnect();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    this.queue = null;
+    this.webhookProcessor = null;
+    this.watchers = [];
+    this.expressRouter = null;
     this.initialized = false;
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Anchor shutdown failed');
+    }
   }
 
   /**
@@ -190,6 +252,19 @@ export class AnchorInstance {
       throw new ConfigError('Queue adapter is not initialized');
     }
     return this.queue;
+  }
+
+  private async cleanupInitializedPlugins(): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    for (const plugin of this.initializedPlugins.splice(0).reverse()) {
+      if (!plugin.cleanup) continue;
+      try {
+        await plugin.cleanup();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
   }
 
   private async processQueueJob(job: QueueJob): Promise<void> {
