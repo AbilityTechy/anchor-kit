@@ -1,34 +1,28 @@
-# PR Summary
-
 ## What does this PR do?
 
-Adds runtime support and tests for queue and sqlite behavior:
+This PR makes background startup and watcher shutdown recoverable, and invokes the declared deposit and SEP-10 challenge plugin hooks.
 
-- Introduces an in-memory queue adapter with a guard against double-start processing.
-- Adds a sqlite runtime database adapter with auth challenge persistence and transaction filtering.
-- Covers sqlite auth challenge lifecycle and pending transaction cutoff filtering with focused tests.
+- Stops the queue and earlier watchers after a later startup failure while preserving the original error.
+- Coordinates watcher start/stop races and tolerates in-flight tick failures during shutdown.
+- Runs deposit and challenge hooks in registration order with typed context; hook failures prevent persistence.
+- Adds focused lifecycle and HTTP integration tests.
 
 ## How to test?
 
-Run the full test suite or the new runtime tests:
-
-```bash
-bun test --run
-```
-
-Or:
-
-```bash
-bun test tests/runtime --run
-```
+- Run `bun test` (434 tests pass across 45 files).
+- For focused coverage, run `bun test tests/runtime/background-lifecycle.test.ts tests/runtime/transaction-watcher.unit.test.ts tests/mvp-express.integration.test.ts`.
 
 ## Checklist
 
-- [x] My code follows the code style of this project.
+- [ ] My code follows the code style of this project.
 - [x] I have added tests for my changes.
-- [ ] I have updated the documentation accordingly.
-- [x] I have run `bun test --run` locally.
+- [x] I have updated the hook contract documentation.
+- [x] I have run `bun run test` locally.
+- [ ] I have run `bun run lint` locally.
 
 ## Issue Reference
 
-Closes #
+Closes #584
+Closes #585
+Closes #589
+Closes #590

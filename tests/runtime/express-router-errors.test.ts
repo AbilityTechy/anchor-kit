@@ -41,7 +41,7 @@ function createMiddleware(database: Partial<DatabaseAdapter> = {}) {
     database: database as DatabaseAdapter,
     webhookProcessor: {
       async process(input) {
-        return { duplicate: false, eventId: input.eventId };
+        return { duplicate: false, eventId: input.eventId, provider: input.provider };
       },
     },
   }).getMiddleware();
@@ -83,7 +83,11 @@ function invoke(
       },
     } as unknown as ServerResponse;
 
-    middleware(req, res, withNext ? (error) => resolve({ status, body: {}, nextError: error }) : undefined);
+    middleware(
+      req,
+      res,
+      withNext ? (error) => resolve({ status, body: {}, nextError: error }) : undefined,
+    );
   });
 }
 
