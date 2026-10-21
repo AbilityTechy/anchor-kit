@@ -22,6 +22,7 @@ This file tracks where the codebase currently aligns or diverges from the canoni
 - In-memory queue adapter for bounded background work and graceful shutdown.
 - SQL-backed settlement job records with stable operation identity and reconnect-safe pending state.
 - Transaction watcher lifecycle for polling pending transactions, persisting watcher tasks, and dispatching work through the queue.
+- Provider-neutral payment rail adapter contract for initiation, event verification, status lookup, and recovery; no provider implementation is bundled.
 
 ## Planned Per Unified Spec (Not Yet Implemented)
 
