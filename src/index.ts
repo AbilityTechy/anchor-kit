@@ -30,6 +30,7 @@ export type {
   QueueAdapter,
   SettlementJobRecord,
   Watcher,
+  WebhookEventRecord,
   WebhookProcessor,
   WatcherTaskRecord,
 } from './runtime/interfaces.ts';
