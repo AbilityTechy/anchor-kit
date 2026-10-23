@@ -1824,8 +1824,8 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
       return { record, inserted: false };
     }
 
-    await this.requirePostgres().query(
-      'INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at, operation_key) VALUES ($1, $2, $3, $4::jsonb, $5, NULL, NULL, $6, $7)',
+    const insertedPg = await this.requirePostgres().query<Record<string, unknown>>(
+      'INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at, operation_key) VALUES ($1, $2, $3, $4::jsonb, $5, NULL, NULL, $6, $7) ON CONFLICT(provider, event_id) DO NOTHING RETURNING *',
       [
         input.id,
         eventId,
@@ -1837,17 +1837,19 @@ export class SqlDatabaseAdapter implements DatabaseAdapter {
       ],
     );
 
-    const response = await this.requirePostgres().query<Record<string, unknown>>(
-      'SELECT * FROM webhook_events WHERE id = $1 LIMIT 1',
-      [input.id],
-    );
-
-    const row = response.rows[0];
+    const row =
+      insertedPg.rows[0] ??
+      (
+        await this.requirePostgres().query<Record<string, unknown>>(
+          'SELECT * FROM webhook_events WHERE provider = $1 AND event_id = $2 LIMIT 1',
+          [provider, eventId],
+        )
+      ).rows[0];
     if (!row) {
       throw new ConfigError('Failed to insert or retrieve webhook event');
     }
 
-    return { record: this.mapWebhookRow(row), inserted: true };
+    return { record: this.mapWebhookRow(row), inserted: insertedPg.rows.length > 0 };
   }
 
   public async claimWebhookEventAttempt(input: {

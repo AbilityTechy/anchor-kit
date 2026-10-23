@@ -1,16 +1,17 @@
-# Implementation Status (Canonical: `anchor-kit-unified.md`)
+# Implementation Status
 
-This file tracks where the codebase currently aligns or diverges from the canonical spec (`anchor-kit-unified.md`) and supporting planning docs (`anchor-kit-trd.md`, `anchor-kit SDK Plan.md`, `anchor-kit-plan.md`).
+The current product scope and runtime decisions are defined in [`anchor-kit-trd.md`](../anchor-kit-trd.md). This document records implementation status; planning material elsewhere in the repository does not imply that planned behavior is shipped.
 
 **For a comprehensive configuration reference with implementation status and usage guidance, see [Configuration Reference](configuration-reference.md).**
 
 ## Implemented Now (Foundation)
 
-- Factory and core instance lifecycle: `createAnchor`, `AnchorInstance`.
-- Configuration model and runtime validation: `AnchorConfig` + `AnchorKitConfig`.
-- Error hierarchy: `AnchorKitError`, `ConfigError`, `ValidationError`, `SepProtocolError`, `TransactionStateError`, `RailError`, `NetworkError`, `CryptoError`.
-- Public type surface for config, transaction states, customer/KYC primitives, and SEP-24 transaction response types.
-- Utility layer: validation, decimal math, cryptographic helpers, idempotency helper, Stellar helper functions.
+- Factory and core instance lifecycle: `createAnchor`, `AnchorInstance`, and plugin registration/initialization.
+- Configuration validation and public error/type surfaces.
+- Express-compatible routes for the current minimal SEP-10 and SEP-24 deposit flows; the SDK does not own the HTTP server.
+- Built-in raw SQL adapter for SQLite and PostgreSQL, including migrations and persistence for the current runtime records.
+- Webhook signature verification, persistence/deduplication, in-process queue, and watcher lifecycle.
+- Utility layer: validation, decimal math, cryptographic helpers, idempotency utilities, and Stellar helpers.
 
 ## Implemented Now (Runtime)
 
@@ -32,7 +33,11 @@ This file tracks where the codebase currently aligns or diverges from the canoni
 - Provider adapters for rails, remote signing, KYC, and rates. A local Stellar Keypair signer is implemented.
 - Protocol transaction state machines and provider integrations.
 
-## Intentionally Deferred
+- Full SEP-6, SEP-24, SEP-31, and SEP-38 protocol flows; withdrawals.
+- Node.js, Hono, Fastify, and Deno support.
+- Public custom database/queue/signer/KYC/rail adapter extension points.
+- Enterprise signing, live KYC providers, and production rail/provider integrations.
+- A runtime transaction state machine beyond the exported initial deposit transition contract.
 
 - Runtime protocol engines and provider integrations listed above remain deferred while foundation APIs and typing guarantees stabilize.
 - Directories under `src/core/sep6`, `src/core/sep24`, and `src/core/sep31` are reserved for future protocol engines; their presence does not indicate runtime conformance.

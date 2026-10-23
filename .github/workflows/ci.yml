@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://anchor:anchor@localhost:5432/anchor_kit_smoke
     services:
       postgres:
         image: postgres:16
@@ -39,6 +41,14 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Verify PostgreSQL test service
+        run: |
+          test -n "$DATABASE_URL"
+          bun -e 'const { Client } = await import("pg"); const client = new Client({ connectionString: process.env.DATABASE_URL }); await client.connect(); await client.query("SELECT 1"); await client.end();'
+
+      - name: PostgreSQL adapter assertions
+        run: bun test tests/runtime/postgres-adapter.integration.test.ts
 
       - name: Lint
         run: bun run lint
