@@ -255,30 +255,44 @@ describe('Atomic Idempotency and Webhook Deduplication Concurrency Tests (#205)'
       async () => {
         if (!db) throw new Error('PostgreSQL database was not initialized');
         const scope = `test:deposit-isolation:${randomUUID()}`;
-        const deposits = Array.from({ length: 8 }, (_, index) => {
+        const deposits = Array.from({ length: 8 }, async (_, index) => {
           const transactionId = randomUUID();
           const idempotencyKey = `deposit-${index}`;
-          return db!.createDepositWithIdempotency({
-            transactionId,
-            account: 'GTEST',
-            assetCode: 'USD',
-            amount: `${index + 1}`,
-            status: 'pending_user_transfer_start',
+          const requestHash = `hash-${index}`;
+          await db!.reserveIdempotencyRecord({
+            id: randomUUID(),
             scope,
-            idempotencyId: randomUUID(),
             idempotencyKey,
-            requestHash: `hash-${index}`,
-            statusCode: 201,
-            responseBody: JSON.stringify({ id: transactionId }),
+            requestHash,
           });
+          await db!.createDepositWithIdempotency({
+            transaction: {
+              id: transactionId,
+              account: 'GTEST',
+              kind: 'deposit',
+              assetCode: 'USD',
+              amount: `${index + 1}`,
+              status: 'pending_user_transfer_start',
+              createdAt: new Date().toISOString(),
+            },
+            idempotency: {
+              scope,
+              idempotencyKey,
+              requestHash,
+              statusCode: 201,
+              responseBody: JSON.stringify({ id: transactionId }),
+            },
+          });
+          return { transactionId, idempotencyKey };
         });
 
         const records = await Promise.all(deposits);
         expect(new Set(records.map((record) => record.idempotencyKey)).size).toBe(8);
-        for (const record of records) {
-          expect(
-            await db.getInteractiveTransactionById(JSON.parse(record.responseBody).id),
-          ).not.toBeNull();
+        for (const { transactionId, idempotencyKey } of records) {
+          expect(await db.getInteractiveTransactionById(transactionId)).not.toBeNull();
+          expect(await db.getIdempotencyRecord(scope, idempotencyKey)).toMatchObject({
+            status: 'completed',
+          });
         }
       },
     );
@@ -300,37 +314,62 @@ describe('Atomic Idempotency and Webhook Deduplication Concurrency Tests (#205)'
 
         const failedKey = 'rollback-target';
         const committedKey = 'independent-commit';
-        const failed = db.createDepositWithIdempotency({
-          transactionId: duplicateTransactionId,
-          account: 'GTEST',
-          assetCode: 'USD',
-          amount: '2',
-          status: 'pending_user_transfer_start',
+        const failedHash = 'failed-hash';
+        const committedHash = 'successful-hash';
+        await db.reserveIdempotencyRecord({
+          id: randomUUID(),
           scope,
-          idempotencyId: randomUUID(),
           idempotencyKey: failedKey,
-          requestHash: 'failed-hash',
-          statusCode: 201,
-          responseBody: '{}',
+          requestHash: failedHash,
+        });
+        await db.reserveIdempotencyRecord({
+          id: randomUUID(),
+          scope,
+          idempotencyKey: committedKey,
+          requestHash: committedHash,
+        });
+        const failed = db.createDepositWithIdempotency({
+          transaction: {
+            id: duplicateTransactionId,
+            account: 'GTEST',
+            kind: 'deposit',
+            assetCode: 'USD',
+            amount: '2',
+            status: 'pending_user_transfer_start',
+            createdAt: new Date().toISOString(),
+          },
+          idempotency: {
+            scope,
+            idempotencyKey: failedKey,
+            requestHash: failedHash,
+            statusCode: 201,
+            responseBody: '{}',
+          },
         });
         const successfulTransactionId = randomUUID();
         const successful = db.createDepositWithIdempotency({
-          transactionId: successfulTransactionId,
-          account: 'GTEST',
-          assetCode: 'USD',
-          amount: '3',
-          status: 'pending_user_transfer_start',
-          scope,
-          idempotencyId: randomUUID(),
-          idempotencyKey: committedKey,
-          requestHash: 'successful-hash',
-          statusCode: 201,
-          responseBody: JSON.stringify({ id: successfulTransactionId }),
+          transaction: {
+            id: successfulTransactionId,
+            account: 'GTEST',
+            kind: 'deposit',
+            assetCode: 'USD',
+            amount: '3',
+            status: 'pending_user_transfer_start',
+            createdAt: new Date().toISOString(),
+          },
+          idempotency: {
+            scope,
+            idempotencyKey: committedKey,
+            requestHash: committedHash,
+            statusCode: 201,
+            responseBody: JSON.stringify({ id: successfulTransactionId }),
+          },
         });
 
         const results = await Promise.allSettled([failed, successful]);
         expect(results[0].status).toBe('rejected');
         expect(results[1].status).toBe('fulfilled');
+        await db.deletePendingIdempotencyRecord(scope, failedKey, failedHash);
         expect(await db.getIdempotencyRecord(scope, failedKey)).toBeNull();
         expect(await db.getIdempotencyRecord(scope, committedKey)).not.toBeNull();
         expect(await db.getInteractiveTransactionById(successfulTransactionId)).not.toBeNull();

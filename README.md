@@ -97,6 +97,7 @@ const anchor = createAnchor({
   },
   webhooks: {
     onEvent: async (event, ctx) => {
+      if (ctx.signal.aborted) return;
       console.log('webhook event', event.eventId, ctx.receivedAt);
     },
   },
@@ -194,9 +195,30 @@ import { makeSqliteDbUrlForTests } from 'anchor-kit';
 const databaseUrl = makeSqliteDbUrlForTests();
 ```
 
-Run the focused PostgreSQL concurrency check with `npm exec -- vitest run tests/runtime/atomic-idempotency-concurrency.test.ts`. Without `TEST_POSTGRES_URL` or `DATABASE_URL`, the test report marks five PostgreSQL cases skipped while running the SQLite cases. With a working PostgreSQL URL, all eight cases execute and pass. When `CI` or `REQUIRE_POSTGRES_TESTS` is set, a missing PostgreSQL URL or failed connection fails the suite instead of silently passing.
+Run `bun test tests/runtime/atomic-idempotency-concurrency.test.ts` to check PostgreSQL concurrency. It skips five PostgreSQL cases when both `TEST_POSTGRES_URL` and `DATABASE_URL` are unset. CI and `REQUIRE_POSTGRES_TESTS` require a working PostgreSQL connection.
 
-Run the plugin cleanup check with `npm exec -- vitest run tests/core/plugin-lifecycle.test.ts`. It should report three passing tests for reverse-order shutdown, initialization rollback, and cleanup failures that remain observable while the database disconnects.
+Run `bun test tests/core/plugin-lifecycle.test.ts` to check reverse-order cleanup during shutdown and initialization rollback. The tests also check that cleanup failures do not prevent database disconnect.
+
+### Custom database adapters
+
+Pass a caller-created `DatabaseAdapter` as the second argument to `createAnchor`.
+Anchor-Kit calls `connect()` and `migrate()` during each `init()` cycle and
+`disconnect()` during shutdown. The caller creates and configures the adapter
+and retains ownership of the instance; do not share an active adapter between
+Anchor instances.
+
+```ts
+import { createAnchor } from 'anchor-kit';
+import type { AnchorKitConfig, DatabaseAdapter } from 'anchor-kit';
+
+declare const config: Partial<AnchorKitConfig>;
+declare const databaseAdapter: DatabaseAdapter;
+const anchor = createAnchor(config, { databaseAdapter });
+```
+
+The hostname of `server.interactiveDomain` is used for SEP-10 challenge domain
+operations. Configure that domain to match the public authentication endpoint;
+when it is omitted, the challenge uses `localhost`.
 
 ## Endpoints
 
