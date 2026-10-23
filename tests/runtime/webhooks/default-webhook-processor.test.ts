@@ -20,29 +20,88 @@ describe('DefaultWebhookProcessor', () => {
       errorMessage: null,
       processedAt: '2024-01-01T00:00:00.000Z',
       createdAt: '2024-01-01T00:00:00.000Z',
+      operationKey: 'test-provider:evt_duplicate',
+      attemptCount: 1,
+      attemptId: null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
     };
+    const eventRecords = new Map<string, WebhookEventRecord>([[existingRecord.id, existingRecord]]);
 
     // AK-046: deduplication is keyed by (provider, event_id). The mock mirrors
     // that behavior so a different provider using the same event_id is treated
     // as a distinct, non-duplicate event.
     mockDatabase = {
       insertOrGetWebhookEvent: async (input) => {
-        if (input.eventId === 'evt_duplicate' && input.provider === 'test-provider') {
-          return { record: existingRecord, inserted: false };
+        const existing = [...eventRecords.values()].find(
+          (record) => record.provider === input.provider && record.eventId === input.eventId,
+        );
+        if (existing) {
+          if (existing.status === 'failed') {
+            const retrying = {
+              ...existing,
+              status: 'pending' as const,
+              errorMessage: null,
+              processedAt: null,
+              attemptId: null,
+              leaseOwner: null,
+              leaseExpiresAt: null,
+            };
+            eventRecords.set(existing.id, retrying);
+            return { record: retrying, inserted: true };
+          }
+          return { record: existing, inserted: false };
         }
-        return {
-          record: {
-            id: input.id,
-            eventId: input.eventId,
-            provider: input.provider,
-            payload: input.payload,
-            status: 'pending' as const,
-            errorMessage: null,
-            processedAt: null,
-            createdAt: new Date().toISOString(),
-          },
-          inserted: true,
+        const record: WebhookEventRecord = {
+          id: input.id,
+          eventId: input.eventId,
+          provider: input.provider,
+          payload: input.payload,
+          status: 'pending',
+          errorMessage: null,
+          processedAt: null,
+          createdAt: new Date().toISOString(),
+          operationKey: input.operationKey ?? `${input.provider}:${input.eventId}`,
+          attemptCount: 0,
+          attemptId: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
         };
+        eventRecords.set(record.id, record);
+        return { record, inserted: true };
+      },
+      claimWebhookAttempt: async ({ id, leaseOwner, leaseDurationMs }) => {
+        const record = [...eventRecords.values()].find((candidate) => candidate.id === id);
+        if (!record || record.status !== 'pending') return null;
+        const claimed = {
+          ...record,
+          attemptId: `attempt-${record.attemptCount + 1}`,
+          attemptCount: record.attemptCount + 1,
+          leaseOwner,
+          leaseExpiresAt: new Date(Date.now() + leaseDurationMs).toISOString(),
+        };
+        eventRecords.set(id, claimed);
+        return claimed;
+      },
+      completeWebhookAttempt: async (input) => {
+        const record = eventRecords.get(input.id);
+        if (
+          !record ||
+          record.attemptId !== input.attemptId ||
+          record.leaseOwner !== input.leaseOwner ||
+          record.status !== 'pending'
+        ) {
+          return false;
+        }
+        eventRecords.set(input.id, {
+          ...record,
+          status: input.status,
+          errorMessage: input.errorMessage ?? null,
+          processedAt: new Date().toISOString(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+        return true;
       },
       updateWebhookEventStatus: async () => {},
     };
@@ -85,6 +144,102 @@ describe('DefaultWebhookProcessor', () => {
     expect(callbackInvokedCount).toBe(1);
   });
 
+  test('attempt identity and stable operation key are exposed to the callback context', async () => {
+    let capturedContext: Record<string, unknown> | undefined;
+    const config: AnchorKitConfig = {
+      network: { network: 'testnet' },
+      server: { interactiveDomain: 'test.example.com' },
+      assets: { assets: [] },
+      framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
+      security: {
+        sep10SigningKey: 'SCZJBZ6S7HWMQVT7DM74JVHVDKCEE5P6I6T3E5M7LJM6LJM6LJM6LJM6',
+        interactiveJwtSecret: 'test-jwt-secret',
+        distributionAccountSecret: 'test-distribution-secret',
+        verifyWebhookSignatures: false,
+      },
+      webhooks: {
+        onEvent: async (_event, context) => {
+          capturedContext = context as unknown as Record<string, unknown>;
+          callbackInvokedCount += 1;
+        },
+      },
+    };
+
+    const contextProcessor = new DefaultWebhookProcessor({
+      config,
+      database: mockDatabase as DatabaseAdapter,
+    });
+
+    const result = await contextProcessor.process({
+      eventId: 'evt_context',
+      provider: 'test-provider',
+      payload: { type: 'test' },
+      rawBody: '{}',
+    });
+
+    expect(callbackInvokedCount).toBe(1);
+    expect(capturedContext).toBeDefined();
+    expect(capturedContext?.attemptId).toBeTruthy();
+    expect(capturedContext?.operationKey).toBeTruthy();
+    expect(capturedContext?.leaseOwner).toBeTruthy();
+    expect(capturedContext?.leaseExpiresAt).toBeTruthy();
+    expect(result.attemptId).toBe((capturedContext as { attemptId?: string })?.attemptId);
+  });
+
+  test('retries reuse the operation key but get a new attempt identity', async () => {
+    const attemptIds = new Set<string>();
+    const operationKeys = new Set<string>();
+    const config: AnchorKitConfig = {
+      network: { network: 'testnet' },
+      server: { interactiveDomain: 'test.example.com' },
+      assets: { assets: [] },
+      framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
+      security: {
+        sep10SigningKey: 'SCZJBZ6S7HWMQVT7DM74JVHVDKCEE5P6I6T3E5M7LJM6LJM6LJM6LJM6',
+        interactiveJwtSecret: 'test-jwt-secret',
+        distributionAccountSecret: 'test-distribution-secret',
+        verifyWebhookSignatures: false,
+      },
+      webhooks: {
+        onEvent: async (_event, context) => {
+          const typedContext = context as unknown as {
+            attemptId?: string;
+            operationKey?: string;
+          };
+          if (typedContext.attemptId) attemptIds.add(typedContext.attemptId);
+          if (typedContext.operationKey) operationKeys.add(typedContext.operationKey);
+          callbackInvokedCount += 1;
+          if (callbackInvokedCount === 1) throw new Error('temporary callback failure');
+        },
+      },
+    };
+
+    const retryProcessor = new DefaultWebhookProcessor({
+      config,
+      database: mockDatabase as DatabaseAdapter,
+    });
+
+    await expect(
+      retryProcessor.process({
+        eventId: 'evt_retry',
+        provider: 'test-provider',
+        payload: { type: 'test' },
+        rawBody: '{}',
+      }),
+    ).rejects.toThrow('Webhook processing failed');
+    await retryProcessor.process({
+      eventId: 'evt_retry',
+      provider: 'test-provider',
+      payload: { type: 'test' },
+      rawBody: '{}',
+      retry: true,
+    });
+
+    expect(callbackInvokedCount).toBe(2);
+    expect(attemptIds.size).toBe(2);
+    expect(operationKeys.size).toBe(1);
+  });
+
   test('duplicate event (same provider + eventId) returns duplicate: true and does not invoke callback', async () => {
     const result = await processor.process({
       eventId: 'evt_duplicate',
@@ -120,7 +275,9 @@ describe('DefaultWebhookProcessor', () => {
     let lateCallbackCount = 0;
     const database: Partial<DatabaseAdapter> = {
       async insertOrGetWebhookEvent(input) {
-        const existing = eventRecords.get(input.eventId);
+        const existing = [...eventRecords.values()].find(
+          (record) => record.provider === input.provider && record.eventId === input.eventId,
+        );
         if (existing) return { record: existing, inserted: false };
         const record: WebhookEventRecord = {
           id: input.id,
@@ -131,16 +288,47 @@ describe('DefaultWebhookProcessor', () => {
           errorMessage: null,
           processedAt: null,
           createdAt: new Date().toISOString(),
+          operationKey: input.operationKey ?? `${input.provider}:${input.eventId}`,
+          attemptCount: 0,
+          attemptId: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
         };
-        eventRecords.set(input.eventId, record);
+        eventRecords.set(record.id, record);
         return { record, inserted: true };
       },
-      async updateWebhookEventStatus(input) {
-        const record = [...eventRecords.values()].find((candidate) => candidate.id === input.id);
-        if (record) {
-          record.status = input.status;
-          record.errorMessage = input.errorMessage ?? null;
+      async claimWebhookAttempt({ id, leaseOwner, leaseDurationMs }) {
+        const record = eventRecords.get(id);
+        if (!record || record.status !== 'pending') return null;
+        const claimed = {
+          ...record,
+          attemptId: `attempt-${record.attemptCount + 1}`,
+          attemptCount: record.attemptCount + 1,
+          leaseOwner,
+          leaseExpiresAt: new Date(Date.now() + leaseDurationMs).toISOString(),
+        };
+        eventRecords.set(id, claimed);
+        return claimed;
+      },
+      async completeWebhookAttempt(input) {
+        const record = eventRecords.get(input.id);
+        if (
+          !record ||
+          record.attemptId !== input.attemptId ||
+          record.leaseOwner !== input.leaseOwner ||
+          record.status !== 'pending'
+        ) {
+          return false;
         }
+        eventRecords.set(input.id, {
+          ...record,
+          status: input.status,
+          errorMessage: input.errorMessage ?? null,
+          processedAt: new Date().toISOString(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+        return true;
       },
     };
     const timeoutProcessor = new DefaultWebhookProcessor({
@@ -177,7 +365,9 @@ describe('DefaultWebhookProcessor', () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(duplicate).toMatchObject({ duplicate: true, status: 'unresolved' });
-    expect(eventRecords.get('evt-timeout')?.status).toBe('unresolved');
+    expect(
+      [...eventRecords.values()].find((record) => record.eventId === 'evt-timeout')?.status,
+    ).toBe('unresolved');
     expect(lateCallbackCount).toBe(1);
   });
 

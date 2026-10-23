@@ -71,12 +71,13 @@ function attachPostgresClient(adapter: SqlDatabaseAdapter, client: unknown): Sql
 }
 
 /**
- * Nineteen statements define one migration sequence after transaction-field
- * persistence and AK-046 provider-scoped deduplication were added:
- *   6 CREATE TABLE + 1 ALTER idempotency_keys + 6 ALTER transaction fields
- *   + 1 DO block for webhook dedupe + 5 CREATE INDEX.
+ * Twenty-eight queries define migration sequence after transaction fields,
+ * webhook-attempt columns, and provider-scoped deduplication were added:
+ *   7 CREATE TABLE + 1 ALTER idempotency_keys + 6 ALTER transaction fields
+ *   + 1 DO block for webhook dedupe + 1 migration lookup + 5 ALTER webhook_events
+ *   + 1 migration insert + 6 CREATE INDEX.
  */
-const POSTGRES_SEQUENCE_LENGTH = 19;
+const POSTGRES_SEQUENCE_LENGTH = 28;
 
 describe('Concurrent database migrations (#600)', () => {
   it('runs a single migration sequence for concurrent callers', async () => {
@@ -125,10 +126,9 @@ describe('Concurrent database migrations (#600)', () => {
 
       await Promise.all(Array.from({ length: 5 }, () => adapter.migrate()));
 
-      // 1 CREATE TABLE batch + 5 CREATE INDEX statements. The webhook dedupe
-      // upgrade is a no-op on a fresh database (the composite constraint is
-      // already present), so it does not add an extra exec call here.
-      expect(execCount).toBe(6);
+      // 1 CREATE TABLE batch + 5 webhook-attempt ALTERs + 6 CREATE INDEX
+      // statements. The provider-dedupe upgrade is a no-op on fresh databases.
+      expect(execCount).toBe(12);
 
       // The schema is usable after the shared migration.
       await adapter.insertAuthChallenge({

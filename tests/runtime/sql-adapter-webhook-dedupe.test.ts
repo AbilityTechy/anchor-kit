@@ -299,13 +299,18 @@ describe('SqlDatabaseAdapter - webhook event deduplication (sqlite)', () => {
         status TEXT NOT NULL,
         error_message TEXT,
         processed_at TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        attempt_id TEXT,
+        attempt_number INTEGER NOT NULL DEFAULT 0,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        operation_key TEXT
       );
     `);
     legacyDb
       .prepare(
-        `INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at)
-         VALUES (?, ?, ?, ?, 'processed', NULL, ?, ?)`,
+        `INSERT INTO webhook_events (id, event_id, provider, payload, status, error_message, processed_at, created_at, attempt_id, attempt_number, operation_key)
+         VALUES (?, ?, ?, ?, 'processed', NULL, ?, ?, ?, ?, ?)`,
       )
       .run(
         'legacy-row',
@@ -314,6 +319,9 @@ describe('SqlDatabaseAdapter - webhook event deduplication (sqlite)', () => {
         '{}',
         '2024-01-01T00:00:00.000Z',
         '2024-01-01T00:00:00.000Z',
+        'attempt-legacy',
+        3,
+        'provider-a:evt-shared-legacy',
       );
     legacyDb.close();
 
@@ -332,6 +340,9 @@ describe('SqlDatabaseAdapter - webhook event deduplication (sqlite)', () => {
       expect(existing.inserted).toBe(false);
       expect(existing.record.id).toBe('legacy-row');
       expect(existing.record.status).toBe('processed');
+      expect(existing.record.attemptId).toBe('attempt-legacy');
+      expect(existing.record.attemptCount).toBe(3);
+      expect(existing.record.operationKey).toBe('provider-a:evt-shared-legacy');
 
       // A different provider using the same event_id must be inserted
       // independently after the upgrade.

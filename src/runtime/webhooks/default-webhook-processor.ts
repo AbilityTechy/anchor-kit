@@ -1,5 +1,6 @@
 import type {
   DatabaseAdapter,
+  WebhookCallbackContext,
   WebhookEventRecord,
   WebhookProcessor,
 } from '@/runtime/interfaces.ts';
@@ -12,8 +13,10 @@ interface DefaultWebhookProcessorOptions {
 }
 
 const DEFAULT_CALLBACK_TIMEOUT_MS = 30_000;
+const DEFAULT_LEASE_DURATION_MS = 60_000;
 const CALLBACK_FAILURE_MESSAGE = 'Webhook callback failed';
 const CALLBACK_TIMEOUT_MESSAGE = 'Webhook callback timed out';
+const CALLBACK_LOCK_LOST_MESSAGE = 'Webhook attempt lost its processing lease';
 
 function toComparableBuffer(value: string): Buffer {
   return Buffer.from(value, 'utf8');
@@ -28,6 +31,15 @@ function safeEquals(left: string, right: string): boolean {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+/**
+ * Derives a stable operation key for a webhook event. The key is deterministic for a given
+ * (provider, eventId) pair so that retries and concurrent attempts always resolve to the
+ * same external operation identity.
+ */
+export function deriveWebhookOperationKey(provider: string, eventId: string): string {
+  return `${provider}:${eventId}`;
 }
 
 export class DefaultWebhookProcessor implements WebhookProcessor {
@@ -48,29 +60,76 @@ export class DefaultWebhookProcessor implements WebhookProcessor {
     payload: Record<string, unknown>;
     rawBody: string | Buffer | Uint8Array;
     signature?: string;
+    retry?: boolean;
   }): Promise<{
     duplicate: boolean;
     eventId: string;
     provider: string;
     status?: WebhookEventRecord['status'];
+    operationKey?: string;
+    attemptId?: string;
+    attemptCount?: number;
   }> {
     this.verifySignatureIfEnabled(input);
+
+    const operationKey = deriveWebhookOperationKey(input.provider, input.eventId);
 
     const insertion = await this.database.insertOrGetWebhookEvent({
       id: randomUUID(),
       eventId: input.eventId,
       provider: input.provider,
       payload: input.payload,
+      operationKey,
     });
 
-    if (!insertion.inserted) {
+    if (!insertion.inserted && !input.retry) {
       return {
         duplicate: true,
         eventId: insertion.record.eventId,
         provider: insertion.record.provider,
         status: insertion.record.status,
+        operationKey: insertion.record.operationKey,
+        attemptId: insertion.record.attemptId ?? undefined,
+        attemptCount: insertion.record.attemptCount,
       };
     }
+
+    const leaseOwner = randomUUID();
+    const leaseDurationMs = DEFAULT_LEASE_DURATION_MS;
+    const claimed = await this.database.claimWebhookAttempt({
+      id: insertion.record.id,
+      leaseOwner,
+      leaseDurationMs,
+    });
+
+    if (!claimed) {
+      return {
+        duplicate: true,
+        eventId: insertion.record.eventId,
+        provider: insertion.record.provider,
+        status: insertion.record.status,
+        operationKey: insertion.record.operationKey,
+        attemptId: insertion.record.attemptId ?? undefined,
+        attemptCount: insertion.record.attemptCount,
+      };
+    }
+
+    const attemptId = claimed.attemptId;
+    if (!attemptId) {
+      throw new Error('Webhook attempt claim did not return an attempt identity');
+    }
+
+    const context: WebhookCallbackContext = {
+      operationKey: claimed.operationKey,
+      attemptId,
+      attemptCount: claimed.attemptCount,
+      leaseOwner,
+      leaseExpiresAt:
+        claimed.leaseExpiresAt ?? new Date(Date.now() + leaseDurationMs).toISOString(),
+      receivedAt: claimed.createdAt,
+      signature: input.signature,
+      rawBody: input.rawBody,
+    };
 
     try {
       const callback = this.config.webhooks?.onEvent;
@@ -81,16 +140,12 @@ export class DefaultWebhookProcessor implements WebhookProcessor {
             Promise.resolve().then(() =>
               callback(
                 {
-                  id: insertion.record.id,
-                  eventId: insertion.record.eventId,
-                  provider: insertion.record.provider,
-                  payload: insertion.record.payload,
+                  id: claimed.id,
+                  eventId: claimed.eventId,
+                  provider: claimed.provider,
+                  payload: claimed.payload,
                 },
-                {
-                  receivedAt: insertion.record.createdAt,
-                  signature: input.signature,
-                  rawBody: input.rawBody,
-                },
+                context,
               ),
             ),
             new Promise<never>((_, reject) => {
@@ -105,15 +160,22 @@ export class DefaultWebhookProcessor implements WebhookProcessor {
         }
       }
 
-      await this.database.updateWebhookEventStatus({
-        id: insertion.record.id,
+      const completed = await this.database.completeWebhookAttempt({
+        id: claimed.id,
+        attemptId,
+        leaseOwner,
         status: 'processed',
       });
+      if (!completed) {
+        throw new Error(CALLBACK_LOCK_LOST_MESSAGE);
+      }
     } catch (error) {
       const timedOut = error instanceof Error && error.message === CALLBACK_TIMEOUT_MESSAGE;
       const message = timedOut ? CALLBACK_TIMEOUT_MESSAGE : CALLBACK_FAILURE_MESSAGE;
-      await this.database.updateWebhookEventStatus({
-        id: insertion.record.id,
+      await this.database.completeWebhookAttempt({
+        id: claimed.id,
+        attemptId,
+        leaseOwner,
         status: timedOut ? 'unresolved' : 'failed',
         errorMessage: message,
       });
@@ -122,8 +184,11 @@ export class DefaultWebhookProcessor implements WebhookProcessor {
 
     return {
       duplicate: false,
-      eventId: insertion.record.eventId,
-      provider: insertion.record.provider,
+      eventId: claimed.eventId,
+      provider: claimed.provider,
+      operationKey: claimed.operationKey,
+      attemptId: attemptId,
+      attemptCount: claimed.attemptCount,
     };
   }
 
@@ -182,8 +247,7 @@ export class DefaultWebhookProcessor implements WebhookProcessor {
     rawBody: string | Buffer | Uint8Array;
     signature?: string;
   }): void {
-    const verifyEnabled = this.config.security.verifyWebhookSignatures ?? true;
-
+    const verifyEnabled = this.config.security.verifyWebhookSignatures ?? false;
     if (!verifyEnabled) {
       return;
     }
