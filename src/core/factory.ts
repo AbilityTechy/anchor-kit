@@ -14,10 +14,11 @@ import type {
   Watcher,
   WebhookProcessor,
 } from '@/runtime/interfaces.ts';
-import { InMemoryQueueAdapter } from '../runtime/queue/in-memory-queue.ts';
-import { TransactionWatcher } from '../runtime/watchers/transaction-watcher.ts';
-import { DefaultWebhookProcessor } from '../runtime/webhooks/default-webhook-processor.ts';
-import type { AnchorKitConfig } from '../types/config.ts';
+import { InMemoryQueueAdapter } from '@/runtime/queue/in-memory-queue.ts';
+import { TransactionWatcher } from '@/runtime/watchers/transaction-watcher.ts';
+import { DefaultWebhookProcessor } from '@/runtime/webhooks/default-webhook-processor.ts';
+import type { SchemaMigration } from '@/types/foundation.ts';
+import type { AnchorKitConfig } from '@/types/config.ts';
 import type { AnchorPlugin, AnchorPluginHooks } from '@/types/plugin.ts';
 
 export interface CreateAnchorOptions {
@@ -104,7 +105,11 @@ export class AnchorInstance {
         }
 
         const queueConcurrency = frameworkConfig.queue?.concurrency ?? 1;
-        this.queue = new InMemoryQueueAdapter({ concurrency: queueConcurrency });
+        this.queue = new InMemoryQueueAdapter({
+          concurrency: queueConcurrency,
+          maxPendingJobs: frameworkConfig.queue?.maxPendingJobs,
+          onError: frameworkConfig.queue?.onError,
+        });
 
         this.webhookProcessor = new DefaultWebhookProcessor({
           config: this.config.getConfig(),
@@ -280,10 +285,21 @@ export class AnchorInstance {
   }
 
   protected createDatabaseAdapter(): DatabaseAdapter {
-    return (
-      this.injectedDatabaseAdapter ??
-      createSqlDatabaseAdapter(this.config.get('framework').database)
-    );
+    if (this.injectedDatabaseAdapter) {
+      return this.injectedDatabaseAdapter;
+    }
+
+    const migrations: SchemaMigration[] = [];
+    for (const plugin of this.plugins.values()) {
+      for (const migration of plugin.schema?.migrations ?? []) {
+        migrations.push({
+          ...migration,
+          name: `plugin:${encodeURIComponent(plugin.id)}:${encodeURIComponent(migration.name)}`,
+        });
+      }
+    }
+
+    return createSqlDatabaseAdapter(this.config.get('framework').database, migrations);
   }
 
   /**

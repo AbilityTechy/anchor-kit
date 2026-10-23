@@ -50,4 +50,10 @@ export type {
   DepositRequestHookContext,
   Context as PluginContext,
 } from './plugin';
-export type { RouteDefinition, SchemaDefinition, SepErrorCode } from './foundation';
+export type {
+  RouteDefinition,
+  SchemaDefinition,
+  SchemaMigration,
+  SchemaMigrationContext,
+  SepErrorCode,
+} from './foundation';
