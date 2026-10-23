@@ -173,7 +173,7 @@ describe('versioned database migrations', () => {
     const key = Keypair.random().secret();
     const anchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: key,
         interactiveJwtSecret: 'plugin-migration-test-secret',

@@ -20,7 +20,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { version } from '../../../package.json';
 import { extractClientIdentifier } from './client-identifier.ts';
 
-const SEP10_NONCE_OP = 'anchor_auth';
+const SEP10_AUTH_OPERATION_SUFFIX = ' auth';
 
 /**
  * Stable issuer for bearer access tokens minted by the anchor API.
@@ -562,14 +562,15 @@ function hasValidClientDomainSignature(
   );
 }
 
-function extractNonceFromChallenge(transaction: Transaction): string | null {
+function extractNonceFromChallenge(transaction: Transaction, homeDomain: string): string | null {
+  const authOperationName = `${homeDomain}${SEP10_AUTH_OPERATION_SUFFIX}`;
   for (const operation of transaction.operations) {
     if (operation.type !== 'manageData') {
       continue;
     }
 
     const manageDataOp = operation as unknown as { name?: unknown; value?: unknown };
-    if (manageDataOp.name !== SEP10_NONCE_OP) {
+    if (manageDataOp.name !== authOperationName) {
       continue;
     }
 
@@ -875,7 +876,7 @@ async function handleAuthChallenge(
   )
     .addOperation(
       Operation.manageData({
-        name: SEP10_NONCE_OP,
+        name: `${context.config.get('server').homeDomain}${SEP10_AUTH_OPERATION_SUFFIX}`,
         value: nonce,
         source: account,
       }),
@@ -908,7 +909,9 @@ async function handleAuthChallenge(
     return;
   }
 
-  if (extractNonceFromChallenge(hookedChallengeTx) !== nonce) {
+  if (
+    extractNonceFromChallenge(hookedChallengeTx, context.config.get('server').homeDomain) !== nonce
+  ) {
     sendJson(res, 500, {
       error: 'challenge_hook_failed',
       message: 'SEP-10 challenge hook returned an invalid transaction',
@@ -937,14 +940,15 @@ async function handleAuthChallenge(
   });
 }
 
-function extractAccountFromChallenge(transaction: Transaction): string | null {
+function extractAccountFromChallenge(transaction: Transaction, homeDomain: string): string | null {
+  const authOperationName = `${homeDomain}${SEP10_AUTH_OPERATION_SUFFIX}`;
   for (const operation of transaction.operations) {
     if (operation.type !== 'manageData') {
       continue;
     }
 
     const manageDataOp = operation as unknown as { name?: unknown; source?: unknown };
-    if (manageDataOp.name === SEP10_NONCE_OP && typeof manageDataOp.source === 'string') {
+    if (manageDataOp.name === authOperationName && typeof manageDataOp.source === 'string') {
       return manageDataOp.source;
     }
   }
@@ -1005,7 +1009,8 @@ async function handleAuthToken(
   }
 
   if (standardRequest) {
-    account = extractAccountFromChallenge(transaction) ?? '';
+    account =
+      extractAccountFromChallenge(transaction, context.config.get('server').homeDomain) ?? '';
     if (!StrKey.isValidEd25519PublicKey(account)) {
       sendJson(res, 401, {
         error: 'invalid_challenge',
@@ -1023,7 +1028,7 @@ async function handleAuthToken(
     return;
   }
 
-  const nonce = extractNonceFromChallenge(transaction);
+  const nonce = extractNonceFromChallenge(transaction, context.config.get('server').homeDomain);
   if (!nonce) {
     sendJson(res, 401, {
       error: 'invalid_challenge',

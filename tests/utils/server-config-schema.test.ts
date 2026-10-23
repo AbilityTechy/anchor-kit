@@ -129,6 +129,7 @@ describe('ServerConfigSchema', () => {
 describe('validateServerConfig', () => {
   it('returns empty array for valid config', () => {
     const errors = validateServerConfig({
+      homeDomain: 'anchor.example.com',
       host: 'localhost',
       port: 3000,
       debug: false,
@@ -139,8 +140,8 @@ describe('validateServerConfig', () => {
     expect(errors).toEqual([]);
   });
 
-  it('returns empty array for empty config (all fields optional)', () => {
-    expect(validateServerConfig({})).toEqual([]);
+  it('requires a home domain when server config is empty', () => {
+    expect(validateServerConfig({})).toEqual(['homeDomain: is required']);
   });
 
   it('returns error for invalid port', () => {

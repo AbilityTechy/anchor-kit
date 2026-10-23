@@ -161,6 +161,7 @@ function makeTestContext(
   const config = new AnchorConfig({
     network: { network: 'testnet' },
     server: {
+      homeDomain: 'anchor.test',
       interactiveDomain: 'https://anchor.test',
       ...(clientAttribution ? { corsOrigins: [`https://${clientAttribution.domain}`] } : {}),
     },
@@ -221,7 +222,7 @@ async function buildSignedChallengeXdr(
     networkPassphrase: Networks.TESTNET,
   }).addOperation(
     Operation.manageData({
-      name: 'anchor_auth',
+      name: `${context.config.get('server').homeDomain} auth`,
       value: nonce,
       source: account,
     }),
@@ -329,7 +330,9 @@ describe('Auth Challenge Consumption Atomicity & Recovery (#451)', () => {
       const challengeXdr = String(request.getResult().body.challenge);
       const transaction = new Transaction(challengeXdr, Networks.TESTNET);
       const nonceOperation = transaction.operations.find(
-        (operation) => operation.type === 'manageData' && operation.name === 'anchor_auth',
+        (operation) =>
+          operation.type === 'manageData' &&
+          operation.name === `${context.config.get('server').homeDomain} auth`,
       );
       expect(nonceOperation?.type).toBe('manageData');
       if (nonceOperation?.type !== 'manageData') {

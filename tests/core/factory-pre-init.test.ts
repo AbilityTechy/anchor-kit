@@ -11,7 +11,10 @@ async function unexpectedDatabaseCall(): Promise<never> {
 describe('AnchorInstance pre-init router access', () => {
   const config = {
     network: { network: 'testnet' as const },
-    server: { interactiveDomain: 'https://anchor.example.com' },
+    server: {
+      homeDomain: 'anchor.example.com',
+      interactiveDomain: 'https://anchor.example.com',
+    },
     security: {
       sep10SigningKey: Keypair.random().secret(),
       interactiveJwtSecret: 'jwt-test-secret',
