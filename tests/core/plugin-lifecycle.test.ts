@@ -14,7 +14,7 @@ function createConfig(): { config: AnchorKitConfig; databaseUrl: string } {
     databaseUrl,
     config: {
       network: { network: 'testnet' },
-      server: { port: 3000 },
+      server: { homeDomain: 'anchor.example.com', port: 3000 },
       security: {
         sep10SigningKey: Keypair.random().secret(),
         interactiveJwtSecret: 'test-jwt-secret',
