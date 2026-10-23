@@ -108,7 +108,7 @@ describe('DefaultWebhookProcessor', () => {
 
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {
@@ -148,7 +148,7 @@ describe('DefaultWebhookProcessor', () => {
     let capturedContext: Record<string, unknown> | undefined;
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {
@@ -191,7 +191,7 @@ describe('DefaultWebhookProcessor', () => {
     const operationKeys = new Set<string>();
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {
@@ -334,7 +334,7 @@ describe('DefaultWebhookProcessor', () => {
     const timeoutProcessor = new DefaultWebhookProcessor({
       config: {
         network: { network: 'testnet' },
-        server: { interactiveDomain: 'test.example.com' },
+        server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
         assets: { assets: [] },
         framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
         security: {
@@ -374,7 +374,7 @@ describe('DefaultWebhookProcessor', () => {
   test('throws when verification is enabled but webhook secret is missing', async () => {
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {
@@ -413,7 +413,7 @@ describe('DefaultWebhookProcessor', () => {
   test('throws on invalid webhook signature and does not invoke callback', async () => {
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {
@@ -455,7 +455,7 @@ describe('DefaultWebhookProcessor', () => {
 
     const config: AnchorKitConfig = {
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'test.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'test.example.com' },
       assets: { assets: [] },
       framework: { database: { provider: 'sqlite', url: 'file::memory:' } },
       security: {

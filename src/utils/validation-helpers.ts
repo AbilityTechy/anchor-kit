@@ -663,6 +663,28 @@ function validateAnchorKitConfig(config: AnchorKitConfig): boolean {
     }
   }
 
+  if (server.homeDomain === undefined || server.homeDomain === null || server.homeDomain === '') {
+    throw new Error('Missing required field: server.homeDomain');
+  }
+  if (!ServerConfigSchema.homeDomain.validate(server.homeDomain)) {
+    throw new Error(
+      'Invalid server.homeDomain: use a hostname only and ensure the SEP-10 auth operation name is at most 64 bytes',
+    );
+  }
+
+  for (const key of ['host', 'corsOrigins'] as const) {
+    const value = server[key];
+    if (value !== undefined && value !== null && !ServerConfigSchema[key].validate(value)) {
+      throw new Error(`server.${key}: invalid value`);
+    }
+  }
+
+  for (const [protocol, value] of Object.entries(metadata?.protocols ?? {})) {
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw new Error(`metadata.protocols.${protocol} must be a boolean`);
+    }
+  }
+
   if (!assets.assets || !Array.isArray(assets.assets) || assets.assets.length === 0) {
     throw new Error('At least one asset must be configured in assets.assets');
   }
@@ -709,6 +731,26 @@ export interface SchemaField {
   validate: (value: unknown) => boolean;
 }
 
+function isValidHomeDomain(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim() !== value || value.length === 0) {
+    return false;
+  }
+
+  const labels = value.split('.');
+  if (
+    labels.some(
+      (label) =>
+        label.length === 0 ||
+        label.length > 63 ||
+        !/^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label),
+    )
+  ) {
+    return false;
+  }
+
+  return new TextEncoder().encode(`${value} auth`).length <= 64;
+}
+
 /**
  * ServerConfigSchema
  * Runtime schema for validating partial ServerConfig objects.
@@ -718,6 +760,12 @@ export interface SchemaField {
  * ServerConfigSchema.port.validate(3000); // true
  */
 export const ServerConfigSchema: Record<keyof Required<ServerConfig>, SchemaField> = {
+  homeDomain: {
+    type: 'string',
+    required: true,
+    description: 'SEP-10 anchor home domain hostname, without scheme or path.',
+    validate: isValidHomeDomain,
+  },
   host: {
     type: 'string',
     required: false,

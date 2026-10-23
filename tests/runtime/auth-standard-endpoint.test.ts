@@ -18,7 +18,7 @@ describe('standard SEP-10 JSON endpoint shapes', () => {
   beforeAll(async () => {
     anchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: serverKeypair.secret(),
         interactiveJwtSecret: 'standard-auth-test-secret',

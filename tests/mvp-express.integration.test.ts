@@ -181,6 +181,7 @@ describe('MVP Express-mounted integration', () => {
     anchor = createAnchor({
       network: { network: 'testnet' },
       server: {
+        homeDomain: 'anchor.example.com',
         interactiveDomain: 'https://anchor.example.com',
         corsOrigins: ['https://app.example.com'],
       },
@@ -312,7 +313,7 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: {},
+      server: { homeDomain: 'anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-email',
@@ -353,7 +354,7 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: {},
+      server: { homeDomain: 'anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-website',
@@ -406,7 +407,7 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { port: 3001 /* different port for safety */ },
+      server: { homeDomain: 'anchor.example.com', port: 3001 /* different port for safety */ },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-no-domain',
@@ -451,7 +452,7 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { port: 3002 },
+      server: { homeDomain: 'anchor.example.com', port: 3002 },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-no-domain-2',
@@ -654,7 +655,7 @@ describe('MVP Express-mounted integration', () => {
     const clientDbUrl = makeSqliteDbUrlForTests();
     const clientAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { corsOrigins: ['https://wallet.example.com'] },
+      server: { homeDomain: 'anchor.example.com', corsOrigins: ['https://wallet.example.com'] },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'client-domain-jwt-secret',
@@ -746,7 +747,10 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-rate-limit',
@@ -925,7 +929,10 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-custom',
@@ -1042,7 +1049,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-token-rate-limit',
@@ -1223,7 +1230,10 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com/' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com/',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-trailing-slash',
@@ -1374,7 +1384,7 @@ describe('MVP Express-mounted integration', () => {
     const disabledDbUrl = makeSqliteDbUrlForTests();
     const disabledAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-disabled',
@@ -1443,7 +1453,10 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-rate-limit',
@@ -1979,7 +1992,10 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret',
@@ -2044,7 +2060,7 @@ describe('MVP Express-mounted integration', () => {
 
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-webhook-unsigned',
@@ -2113,7 +2129,10 @@ describe('MVP Express-mounted integration', () => {
 
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: {
+        homeDomain: 'anchor.example.com',
+        interactiveDomain: 'https://anchor.example.com',
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-webhook-misconfigured',
@@ -2485,7 +2504,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: {},
+      server: { homeDomain: 'anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-webhook-oversize',
@@ -2556,7 +2575,7 @@ describe('MVP Express-mounted integration', () => {
     const customDbUrl = makeSqliteDbUrlForTests();
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: {},
+      server: { homeDomain: 'anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-error-event-id',
@@ -2953,7 +2972,7 @@ describe('MVP Express-mounted integration', () => {
     })
       .addOperation(
         Operation.manageData({
-          name: 'anchor_auth',
+          name: 'anchor.example.com auth',
           value: 'wrong-source-test',
           source: account,
         }),
@@ -3023,7 +3042,7 @@ describe('MVP Express-mounted integration', () => {
     })
       .addOperation(
         Operation.manageData({
-          name: 'anchor_auth',
+          name: 'anchor.example.com auth',
           value: 'wrong-source-test',
           source: account,
         }),
@@ -3401,7 +3420,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: {},
+      server: { homeDomain: 'anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret',
@@ -3477,7 +3496,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-oversize',
@@ -3560,7 +3579,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { interactiveDomain: 'https://anchor.example.com' },
+      server: { homeDomain: 'anchor.example.com', interactiveDomain: 'https://anchor.example.com' },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-oversize',
@@ -3663,7 +3682,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { requestTimeout: 5000 }, // Custom timeout
+      server: { homeDomain: 'anchor.example.com', requestTimeout: 5000 }, // Custom timeout
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-timeout',
@@ -3812,7 +3831,10 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { corsOrigins: ['https://example.com', 'https://trusted-site.com'] },
+      server: {
+        homeDomain: 'anchor.example.com',
+        corsOrigins: ['https://example.com', 'https://trusted-site.com'],
+      },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-cors',
@@ -3927,7 +3949,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { corsOrigins: ['https://example.com'] },
+      server: { homeDomain: 'anchor.example.com', corsOrigins: ['https://example.com'] },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-cors',
@@ -3978,7 +4000,7 @@ describe('MVP Express-mounted integration', () => {
       : customDbUrl;
     const customAnchor = createAnchor({
       network: { network: 'testnet' },
-      server: { corsOrigins: ['https://example.com'] },
+      server: { homeDomain: 'anchor.example.com', corsOrigins: ['https://example.com'] },
       security: {
         sep10SigningKey: sep10ServerKeypair.secret(),
         interactiveJwtSecret: 'jwt-test-secret-cors',
