@@ -60,6 +60,12 @@ export interface InteractiveTransactionRecord {
   kind: 'deposit';
   assetCode: string;
   amount: string;
+  amountIn?: string | null;
+  amountOut?: string | null;
+  amountFee?: string | null;
+  currency?: string | null;
+  railReference?: string | null;
+  stellarTransactionHash?: string | null;
   status: TransactionStatus;
   createdAt: string;
   updatedAt: string;
@@ -126,6 +132,12 @@ export interface DatabaseAdapter {
     kind: 'deposit';
     assetCode: string;
     amount: string;
+    amountIn?: string | null;
+    amountOut?: string | null;
+    amountFee?: string | null;
+    currency?: string | null;
+    railReference?: string | null;
+    stellarTransactionHash?: string | null;
     status: TransactionStatus;
   }): Promise<InteractiveTransactionRecord>;
   getInteractiveTransactionById(id: string): Promise<InteractiveTransactionRecord | null>;

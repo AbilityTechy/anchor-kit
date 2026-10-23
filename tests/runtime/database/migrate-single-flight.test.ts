@@ -71,12 +71,12 @@ function attachPostgresClient(adapter: SqlDatabaseAdapter, client: unknown): Sql
 }
 
 /**
- * Thirteen statements define one migration sequence after AK-046 added the
- * idempotent composite-unique upgrade for `webhook_events`:
- *   6 CREATE TABLE + 1 ALTER idempotency_keys + 1 DO block for webhook dedupe
- *   + 5 CREATE INDEX.
+ * Nineteen statements define one migration sequence after transaction-field
+ * persistence and AK-046 provider-scoped deduplication were added:
+ *   6 CREATE TABLE + 1 ALTER idempotency_keys + 6 ALTER transaction fields
+ *   + 1 DO block for webhook dedupe + 5 CREATE INDEX.
  */
-const POSTGRES_SEQUENCE_LENGTH = 13;
+const POSTGRES_SEQUENCE_LENGTH = 19;
 
 describe('Concurrent database migrations (#600)', () => {
   it('runs a single migration sequence for concurrent callers', async () => {
