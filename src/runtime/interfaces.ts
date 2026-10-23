@@ -71,6 +71,14 @@ export interface InteractiveTransactionRecord {
   updatedAt: string;
 }
 
+export type TransactionTransitionResult =
+  | { outcome: 'updated'; transaction: InteractiveTransactionRecord }
+  | {
+      outcome: 'conflict';
+      reason: 'invalid_transition' | 'status_mismatch' | 'not_found';
+      transaction: InteractiveTransactionRecord | null;
+    };
+
 export interface IdempotencyRecord {
   id: string;
   scope: string;
@@ -288,6 +296,11 @@ export type QueueJob =
   | { type: 'expire_transaction'; payload: { transactionId: string } }
   | { type: 'process_watcher_task'; payload: { watcherTaskId: string } }
   | { type: 'cleanup_records'; payload: { retentionDays: number } };
+
+export interface QueueDrainStatus {
+  readonly pending: number;
+  readonly active: number;
+}
 
 export interface QueueDrainStatus {
   readonly pending: number;

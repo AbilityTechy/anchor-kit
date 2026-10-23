@@ -380,6 +380,7 @@ function endpointPath(req: IncomingMessage): string {
 const BUILT_IN_PATHS = new Set([
   '/health',
   '/info',
+  '/auth',
   '/auth/challenge',
   '/auth/token',
   '/transactions/deposit/interactive',
@@ -736,6 +737,7 @@ async function handleInfo(context: ExpressRouterContext, res: ServerResponse): P
 }
 
 function allowedMethodsForPath(path: string): readonly string[] | undefined {
+  if (path === '/auth') return ['GET', 'POST'];
   if (path === '/health' || path === '/info' || path === '/auth/challenge') return ['GET'];
   if (
     path === '/auth/token' ||
@@ -818,6 +820,7 @@ async function handleAuthChallenge(
   context: ExpressRouterContext,
   req: IncomingMessage,
   res: ServerResponse,
+  standardResponse = false,
 ): Promise<void> {
   if (!checkRateLimit(context, req, res, 'auth_challenge')) {
     return;
@@ -927,17 +930,33 @@ async function handleAuthChallenge(
 
   res.setHeader('Cache-Control', 'no-store');
   sendJson(res, 200, {
-    challenge: challengeXdr,
+    [standardResponse ? 'transaction' : 'challenge']: challengeXdr,
     network_passphrase: context.networkPassphrase,
     expires_at: expiresAt,
     expires_in: expirationSeconds,
   });
 }
 
+function extractAccountFromChallenge(transaction: Transaction): string | null {
+  for (const operation of transaction.operations) {
+    if (operation.type !== 'manageData') {
+      continue;
+    }
+
+    const manageDataOp = operation as unknown as { name?: unknown; source?: unknown };
+    if (manageDataOp.name === SEP10_NONCE_OP && typeof manageDataOp.source === 'string') {
+      return manageDataOp.source;
+    }
+  }
+
+  return null;
+}
+
 async function handleAuthToken(
   context: ExpressRouterContext,
   req: IncomingMessage,
   res: ServerResponse,
+  standardRequest = false,
 ): Promise<void> {
   if (!checkRateLimit(context, req, res, 'auth_token')) {
     return;
@@ -948,18 +967,25 @@ async function handleAuthToken(
     return;
   }
 
-  const account = typeof parsedBody.body.account === 'string' ? parsedBody.body.account.trim() : '';
-  const signedChallenge =
-    typeof parsedBody.body.challenge === 'string' ? parsedBody.body.challenge : '';
-  if (!account || !signedChallenge) {
+  let account = typeof parsedBody.body.account === 'string' ? parsedBody.body.account.trim() : '';
+  const signedChallenge = standardRequest
+    ? typeof parsedBody.body.transaction === 'string'
+      ? parsedBody.body.transaction
+      : ''
+    : typeof parsedBody.body.challenge === 'string'
+      ? parsedBody.body.challenge
+      : '';
+  if ((!standardRequest && !account) || !signedChallenge) {
     sendJson(res, 400, {
       error: 'invalid_request',
-      message: 'Body must include account and challenge',
+      message: standardRequest
+        ? 'Body must include transaction'
+        : 'Body must include account and challenge',
     });
     return;
   }
 
-  if (!StrKey.isValidEd25519PublicKey(account)) {
+  if (!standardRequest && !StrKey.isValidEd25519PublicKey(account)) {
     sendJson(res, 400, {
       error: 'invalid_request',
       message: 'account must be a valid Stellar public key',
@@ -976,6 +1002,17 @@ async function handleAuthToken(
       message: 'Challenge transaction is invalid',
     });
     return;
+  }
+
+  if (standardRequest) {
+    account = extractAccountFromChallenge(transaction) ?? '';
+    if (!StrKey.isValidEd25519PublicKey(account)) {
+      sendJson(res, 401, {
+        error: 'invalid_challenge',
+        message: 'Challenge account is invalid',
+      });
+      return;
+    }
   }
 
   if (transaction.source !== context.sep10ServerKeypair.publicKey()) {
@@ -1521,6 +1558,7 @@ const TRANSACTION_PATH_RE = /^\/transactions\/([^/]*)$/;
 const KNOWN_ROUTES: Record<string, string[]> = {
   '/health': ['GET'],
   '/info': ['GET'],
+  '/auth': ['GET', 'POST'],
   '/auth/challenge': ['GET'],
   '/auth/token': ['POST'],
   '/transactions/deposit/interactive': ['POST'],
@@ -1573,6 +1611,16 @@ export async function handleExpressRouterRequest(
     (async () => {
       if (method === 'GET' && path === '/info') {
         await handleInfo(context, res);
+        return;
+      }
+
+      if (method === 'GET' && path === '/auth') {
+        await handleAuthChallenge(context, req, res, true);
+        return;
+      }
+
+      if (method === 'POST' && path === '/auth') {
+        await handleAuthToken(context, req, res, true);
         return;
       }
 
